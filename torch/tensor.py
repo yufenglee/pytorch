@@ -18,24 +18,24 @@ from numbers import Number
 # NB: If you add a new method to Tensor, you must update
 # torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
+
+# Note [Serialize XLA tensors]
+# For tensors don't have storages like XLA, we serialize tensor.cpu().tolist()
+# instead and move it to XLA after tensor is constructed from list and resized
+# to the right shape.
 #
-# Note [Serialize opaque tensors]
-#     For devices don't have storages like XLA, we should first serialize CPU storage and
-#     move it to XLA after tensor is contructed from storage.
-#     This allows copy.copy(xla_tensor) returns a XLA tensor.
-#
-#     However, it's not sufficient to make torch.save/torch.load work.
-#     PyTorch torch.load() logic:
-#     - first construct Tensor on top of an randomly initialized storage
-#     - load the serialized content to existing storage inplace.
-#     This approach works fine for CPU and CUDA which has associated storage,
-#     but for opaque devices like XLA, it won't pickup the storage update as
-#     tensor is disconnected with CPU storage once it's instantiated.
-#     One option is to ask users manually call xla_tensor.cpu() before calling
-#     into torch.save(), but this introduces an intrusive hard error.
-#     For opaque tensors, it makes more sense to implicitly transfer them to CPU
-#     before saving at framework level. To achieve this, we force torch.device('xla')
-#     change to torch.device('cpu') in torch.save().
+# There're two known issues in the current approach:
+# - View-relationship is not preserved in XLA tensor serialization.
+#   E.g. B = A[0],
+#        C = A[0:2]
+#        torch.save([B, C], ‘temp’)
+#        loadB, loadC = torch.load(‘temp’)
+#   In CPU/CUDA case `loadB` and `loadC` still shares storage, which means
+#   `loadB` changes as `loadC`.
+#   In XLA case `loadB` and `loadC` are separate.
+# - torch.load(cpu.pt, map_location=torch.device('xla')) is not supported
+#   This limitation comes from CPU/CUDA tensors are restored to dst device
+#   at **storage** level that XLA doesn't have.
 
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
@@ -45,7 +45,7 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse:
+            if self.is_sparse or self.device.type == 'xla':
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -59,17 +59,9 @@ class Tensor(torch._C._TensorBase):
         _check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
-        # See Note [Serialize opaque tensors]
+        # See Note [Serialize XLA tensors]
         if self.device.type == 'xla':
-            self_cpu = self.cpu()
-            args = (self_cpu.storage(),
-                    self_cpu.storage_offset(),
-                    tuple(self.size()),
-                    self_cpu.stride(),
-                    self.requires_grad,
-                    OrderedDict(),
-                    self.device)
-            return (torch._utils._rebuild_opaque_tensor, args)
+            return (torch._utils._rebuild_xla_tensor, (self,))
         if self.is_quantized:
             args = (self.storage(),
                     self.storage_offset(),
