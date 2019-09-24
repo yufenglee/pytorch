@@ -45,6 +45,16 @@ class Test(torch.jit.ScriptModule):
         return input
 
     @torch.jit.script_method
+    def tensorDiv2(self, input):
+        # type: (Tensor) -> Tensor
+        return torch.div(input, 2)
+
+    @torch.jit.script_method
+    def tensorAdd1(self, input):
+        # type: (Tensor) -> Tensor
+        return torch.add(input, 1)
+
+    @torch.jit.script_method
     def eqDictStrKeyIntValue(self, input):
         # type: (Dict[str, int]) -> Dict[str, int]
         return input

@@ -18,6 +18,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -295,6 +296,105 @@ public class PytorchInstrumentedTests {
       assertTrue(output.isString());
       String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
       assertTrue(expectedOutput.equals(output.getString()));
+    }
+  }
+
+  @Test
+  public void testAdd1ForByteTensors() throws IOException {
+    final long[] inputTensorShape = new long[]{256};
+    final long numElements = Tensor.numel(inputTensorShape);
+    final byte[] inputTensorData = new byte[(int) numElements];
+    for (int i = 0; i < numElements; ++i) {
+      inputTensorData[i] = (byte) i;
+    }
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+
+    final Tensor inputTensorUint8 = Tensor.newUInt8Tensor(inputTensorShape, inputTensorData);
+    final Tensor inputTensorInt8 = Tensor.newInt8Tensor(inputTensorShape, inputTensorData);
+
+    final IValue inputUint8 = IValue.tensor(inputTensorUint8);
+    final IValue inputInt8 = IValue.tensor(inputTensorInt8);
+
+    final IValue outputUint8 = module.runMethod("tensorAdd1", inputUint8);
+    final Tensor outputTensorUint8 = outputUint8.getTensor();
+
+    final IValue outputInt8 = module.runMethod("tensorAdd1", inputInt8);
+    final Tensor outputTensorInt8 = outputInt8.getTensor();
+
+    byte[] outputDataUint8 = outputTensorUint8.getDataAsUnsignedByteArray();
+    byte[] outputDataInt8 = outputTensorInt8.getDataAsByteArray();
+
+    for (int i = 0; i < numElements; i++) {
+      final byte iB = (byte) i;
+      final byte outUint8B = outputDataUint8[i];
+      final byte outInt8B = outputDataInt8[i];
+
+      final int outUint8UI = byteToUnsignedInt(outUint8B);
+      final int expectedOutUint8UI = i != 255 ? i + 1 : 0;
+      final byte expectedOutUint8B = (byte) expectedOutUint8UI;
+      assertEqualsBytes(expectedOutUint8B, outUint8B);
+      assertEquals(expectedOutUint8UI, outUint8UI);
+
+      final int expectedOutInt8I = i == Byte.MAX_VALUE ? Byte.MIN_VALUE : ((int) iB) + 1;
+      final byte expectedOutInt8B = (byte) expectedOutInt8I;
+      assertEqualsBytes(expectedOutInt8B, outInt8B);
+      assertEquals(expectedOutInt8I, (int) outInt8B);
+    }
+  }
+
+  private static int byteToUnsignedInt(byte b) {
+    return ((int) b) & 0xff;
+  }
+
+  private static void assertEqualsBytes(byte expected, byte actual) {
+    if (expected != actual) {
+      assertTrue(String.format("Expected byte:%s(%s) actual byte:%s(%s)", Byte.toString(expected),
+          byteToBinaryString(expected), Byte.toString(actual), byteToBinaryString(actual)), false);
+    }
+  }
+
+  private static String byteToBinaryString(byte b) {
+    return String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0');
+  }
+
+  @Test
+  public void testTensorDiv2ForByteTensors() throws IOException {
+    final long[] inputTensorShape = new long[]{256};
+    final long numElements = Tensor.numel(inputTensorShape);
+    final byte[] inputTensorData = new byte[(int) numElements];
+    for (int i = 0; i < numElements; ++i) {
+      inputTensorData[i] = (byte) i;
+    }
+
+    final Tensor inputTensorUint8 = Tensor.newUInt8Tensor(inputTensorShape, inputTensorData);
+    final Tensor inputTensorInt8 = Tensor.newInt8Tensor(inputTensorShape, inputTensorData);
+
+    final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
+
+    final IValue inputUint8 = IValue.tensor(inputTensorUint8);
+    final IValue inputInt8 = IValue.tensor(inputTensorInt8);
+
+    final IValue outputUint8 = module.runMethod("tensorDiv2", inputUint8);
+    final Tensor outputTensorUint8 = outputUint8.getTensor();
+
+    final IValue outputInt8 = module.runMethod("tensorDiv2", inputInt8);
+    final Tensor outputTensorInt8 = outputInt8.getTensor();
+
+    final byte[] outputDataUint8 = outputTensorUint8.getDataAsUnsignedByteArray();
+    final byte[] outputDataInt8 = outputTensorInt8.getDataAsByteArray();
+
+    byte expectedOutUint8B = 0;
+    byte expectedOutInt8B = 0;
+    for (int i = 0; i < numElements; i++) {
+      if (i > 0 && i % 2 == 0) {
+        expectedOutUint8B++;
+      }
+      final byte iB = (byte) i;
+      expectedOutInt8B = (byte) (((int) iB) / 2);
+      final byte outUint8B = outputDataUint8[i];
+      final byte outInt8B = outputDataInt8[i];
+      assertEqualsBytes(expectedOutInt8B, outInt8B);
+      assertEqualsBytes(expectedOutUint8B, outUint8B);
     }
   }
 
