@@ -7,13 +7,15 @@ import torch.nn._intrinsic as nni
 import torch.nn._intrinsic.quantized as nniq
 import torch.nn._intrinsic.qat as nniqat
 from torch.quantization import \
-    QConfig_dynamic, default_weight_observer, get_observer_dict,\
+    QConfig, QConfig_dynamic, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
+    quantize_script, default_observer, \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
 from common_utils import run_tests
-from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
+from common_quantization import QuantizationTestCase, \
+    AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
     ModForWrapping, \
@@ -23,6 +25,8 @@ from common_quantization import QuantizationTestCase, SingleLayerLinearModel, \
 
 from common_quantization import AnnotatedTwoLayerLinearModel, AnnotatedNestedModel, \
     AnnotatedSubNestedModel, AnnotatedCustomConfigNestedModel
+
+from jit_utils import _tmp_donotuse_dont_inline_everything
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -35,12 +39,12 @@ import copy
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
-class PostTrainingQuantTest(QuantizationTestCase):
+class EagerModePostTrainingQuantTest(QuantizationTestCase):
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
         """
-        model = SingleLayerLinearModel()
+        model = AnnotatedSingleLayerLinearModel()
         prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
@@ -60,7 +64,7 @@ class PostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
         # test one line API
-        model = quantize(SingleLayerLinearModel(), test_only_eval_fn,
+        model = quantize(AnnotatedSingleLayerLinearModel(), test_only_eval_fn,
                          self.calib_data)
         checkQuantized(model)
 
@@ -570,7 +574,7 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
     " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
     " with instruction set support avx2 or newer.",
 )
-class QuantizationAwareTrainingTest(QuantizationTestCase):
+class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
     def test_manual(self):
         model = ManualLinearQATModel()
         prepare_qat(model)
@@ -624,6 +628,37 @@ class QuantizationAwareTrainingTest(QuantizationTestCase):
         model = ManualConvLinearQATModel()
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
+
+
+@unittest.skipIf(
+    not torch.fbgemm_is_cpu_supported(),
+    " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+    " with instruction set support avx2 or newer.",
+)
+@unittest.skip("temoprarily disable the test - enable after known issues are fixed")
+class GraphModePostTrainingQuantTest(QuantizationTestCase):
+    @_tmp_donotuse_dont_inline_everything
+    def test_single_layer(self):
+        r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
+        to nnq.Linear which is the quantized version of the module
+        """
+        # eager mode
+        model_eager = quantize(AnnotatedSingleLayerLinearModel(), test_only_eval_fn,
+                               self.calib_data)
+
+        qconfig_dict = {
+            '': QConfig(
+                activation=default_observer(),
+                weight=default_weight_observer())
+        }
+        model_script = quantize_script(
+            torch.jit.script(SingleLayerLinearModel()),
+            qconfig_dict,
+            test_only_eval_fn,
+            [self.calib_data])
+        result_eager = model_eager(self.calib_data[0][0])
+        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+        self.assertEqual(result_eager, result_script)
 
 
 class ScriptabilityTest(QuantizationTestCase):
@@ -873,7 +908,7 @@ class ObserverTest(QuantizationTestCase):
                  ' we are in a UBSAN environment.')
 class QuantizationDebugTest(QuantizationTestCase):
     def test_record_observer(self):
-        model = SingleLayerLinearModel()
+        model = AnnotatedSingleLayerLinearModel()
         model.qconfig = default_debug_qconfig
         prepare(model)
         # run the evaluation and dump all tensors
