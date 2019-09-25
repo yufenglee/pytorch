@@ -44,7 +44,7 @@ double calculate_kaiming_std(
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if (mode == FanMode::FanIn) {
+  if (c10::get_if<enumtype::FanIn>(&mode)) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -54,12 +54,12 @@ double calculate_kaiming_std(
 } // namespace
 
 double calculate_gain(Nonlinearity nonlinearity, double param) {
-  if (nonlinearity == Nonlinearity::Tanh) {
-    return 5.0 / 3.0;
-  } else if (nonlinearity == Nonlinearity::ReLU) {
-    return std::sqrt(2.0);
-  } else if (nonlinearity == Nonlinearity::LeakyReLU) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));
+  if (c10::get_if<enumtype::Tanh>(&nonlinearity)) {
+    return 5.0 / 3.0;  // NOLINT
+  } else if (c10::get_if<enumtype::ReLU>(&nonlinearity)) {
+    return std::sqrt(2.0);  // NOLINT
+  } else if (c10::get_if<enumtype::LeakyReLU>(&nonlinearity)) {
+    return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 
   return 1.0;
