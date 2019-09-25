@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
-from . import init_rref_context
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _init_rref_context, _check_rref_leaks
 from . import ProcessGroupAgent
-from . import WorkerId
+from . import WorkerInfo
 from .internal_rpc_utils import serialize, PythonUDF
 from .rpc_backend_handler import is_backend_registered, registered_init_rpc
 
@@ -35,7 +36,7 @@ def join_rpc():
     if _agent:
         _agent.join()
         _agent = None
-
+        _check_rref_leaks()
 
 @_require_initialized
 def sync_rpc():
@@ -75,38 +76,39 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
-        init_rref_context(_agent)
+        _init_rref_context(_agent)
     elif is_backend_registered(backend):
         _agent = registered_init_rpc(backend,
                                      self_rank=self_rank,
                                      self_name=self_name,
                                      init_method=init_method)
-        init_rref_context(_agent)
+        _init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
 @_require_initialized
-def get_worker_id(worker_name=None):
+def get_worker_info(worker_name=None):
     r"""
-    Get worker id of a given worker name. Use this worker id to avoid passing
-    an expensive string to ``rpc`` on every invocation.
+    Get WorkerInfo of a given worker name. Use this WorkerInfo to avoid passing
+    an expensive string to ``rpc`` on every invocation. The WorkerInfo contains
+    the name of the worker and the id of the worker.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
                            the id of the current worker. (default ``None``)
     """
     if worker_name:
-        return _agent.get_worker_id(worker_name)
+        return _agent.get_worker_info(worker_name)
     else:
-        return _agent.get_worker_id()
+        return _agent.get_worker_info()
 
 
-def _to_worker_id(name_or_id):
-    if isinstance(name_or_id, WorkerId):
+def _to_worker_info(name_or_id):
+    if isinstance(name_or_id, WorkerInfo):
         return name_or_id
     elif isinstance(name_or_id, str):
-        return get_worker_id(name_or_id)
+        return get_worker_info(name_or_id)
     else:
         raise ValueError("Unsupported RPC worker ID type {}".format(name_or_id))
 
@@ -137,7 +139,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
         >>> dist.init_rpc("worker0")
-        >>> worker1 = dist.get_worker_id("worker1")
+        >>> worker1 = dist.get_worker_info("worker1")
         >>> rref1 = dist.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = dist.remote(worker1, torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
@@ -154,8 +156,15 @@ def remote(to, func, args=None, kwargs=None):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    return invoke_remote_builtin(
-        _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
+    to = _to_worker_info(to)
+    if qualified_name is not None:
+        return invoke_remote_builtin(
+            _agent, to, qualified_name, *args, **kwargs)
+    else:
+        rref = invoke_remote_python_udf(
+            _agent, to, serialize(PythonUDF(func, args, kwargs)))
+
+        return rref
 
 
 @_require_initialized
@@ -209,7 +218,7 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
         >>> dist.init_model_parallel("worker0")
-        >>> worker1 = dist.get_worker_id("worker1")
+        >>> worker1 = dist.get_worker_info("worker1")
         >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
         >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
         >>> result = fut1.wait() + fut2.wait()
@@ -229,12 +238,12 @@ def rpc(to, func, args=None, kwargs=None, async_call=False):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
+    to = _to_worker_info(to)
     if qualified_name is not None:
-        fut = invoke_rpc_builtin(
-            _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
+        fut = invoke_rpc_builtin(_agent, to, qualified_name, *args, **kwargs)
     else:
         fut = invoke_rpc_python_udf(
-            _agent, _to_worker_id(to), serialize(PythonUDF(func, args, kwargs)))
+            _agent, to, serialize(PythonUDF(func, args, kwargs)))
 
     if async_call:
         return fut

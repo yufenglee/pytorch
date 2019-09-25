@@ -10,6 +10,7 @@ PythonRpcHandler::PythonRpcHandler() {
       py::module::import("torch.distributed.internal_rpc_utils");
   runUDFFunction_ = module.attr("run_python_udf_internal");
   loadResultFunction_ = module.attr("load_python_udf_result_internal");
+  serializeFunction_ = module.attr("serialize");
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
@@ -20,12 +21,28 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
 std::vector<char> PythonRpcHandler::generatePythonUDFResult(
     const Message& request) {
   AutoGIL ag;
-  auto pargs = py::bytes(request.payload().data(), request.payload().size());
+  auto pickledPythonUDF =
+      py::bytes(request.payload().data(), request.payload().size());
   TORCH_CHECK(runUDFFunction_ != nullptr, "runUDFFunction_ is nullptr");
-  py::bytes pres = runUDFFunction_(pargs);
-  const auto& presStr = static_cast<std::string>(pres);
-  std::vector<char> payload(presStr.begin(), presStr.end());
+  py::object res = runUDFFunction_(pickledPythonUDF);
+  const auto& resStr = static_cast<std::string>(serialize(res));
+  std::vector<char> payload(resStr.begin(), resStr.end());
   return payload;
+}
+
+py::object PythonRpcHandler::runPythonUDF(const std::string& pickledPythonUDF) {
+  AutoGIL ag;
+  return runUDFFunction_(py::bytes(pickledPythonUDF));
+}
+
+std::string PythonRpcHandler::serialize(const py::object& obj) {
+  AutoGIL ag;
+  return static_cast<std::string>((py::bytes)serializeFunction_(obj));
+}
+
+py::object PythonRpcHandler::deserialize(const std::string& serializedObj) {
+  AutoGIL ag;
+  return loadResultFunction_(py::bytes(serializedObj));
 }
 
 py::object PythonRpcHandler::loadPythonUDFResult(const Message& message) {

@@ -8,9 +8,9 @@ namespace distributed {
 namespace rpc {
 
 using worker_id_t = int16_t;
-using local_id_t = uint64_t;
+using local_id_t = int64_t;
 
-struct GloballyUniqueId final {
+struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;
 
@@ -32,7 +32,9 @@ struct GloballyUniqueId final {
   const local_id_t localId_;
 };
 
-std::ostream& operator<<(std::ostream& os, const GloballyUniqueId& globalId);
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const GloballyUniqueId& globalId);
 
 using RRefId = GloballyUniqueId;
 using ForkId = GloballyUniqueId;

@@ -23,7 +23,7 @@ def run_python_udf_internal(pickled_python_udf):
         # except str = exception info + traceback string
         except_str = "{}\n{}".format(repr(e), traceback.format_exc())
         result = RemoteException(except_str)
-    return serialize(result)
+    return result
 
 
 def load_python_udf_result_internal(pickled_python_result):

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/rpc/message.h>
+#include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -21,6 +22,12 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
   py::object loadPythonUDFResult(const Message& message);
+  // Run a pickled Python UDF and return the result py::object
+  py::object runPythonUDF(const std::string& pickledPythonUDF);
+  // Serialized a py::object into a string
+  std::string serialize(const py::object& obj);
+  // Deserialize a string into a py::object
+  py::object deserialize(const std::string& serializedObj);
 
  private:
   PythonRpcHandler();
@@ -33,6 +40,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   py::object runUDFFunction_;
   py::object loadResultFunction_;
+  py::object serializeFunction_;
 };
 
 } // namespace rpc
