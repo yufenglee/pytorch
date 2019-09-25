@@ -19584,42 +19584,43 @@ class TestClassType(JitTestCase):
                 return as_interface(x)
 
         # Test interface/class python assignment
-        with torch.jit._disable_emit_hooks():
-            class TestPyAssign(nn.Module):
-                def __init__(self):
-                    super(TestPyAssign, self).__init__()
-                    self.proxy_mod = Foo()
+        class TestPyAssign(nn.Module):
+            proxy_mod: OneTwo
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def __init__(self):
+                super(TestPyAssign, self).__init__()
+                self.proxy_mod = Foo()
 
-            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            input = torch.rand(3, 4)
-            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
-            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+        TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
 
-            class TestPyAssignError(nn.Module):
-                def __init__(self, obj):
-                    super(TestPyAssignError, self).__init__()
-                    self.proxy_mod = obj
+        input = torch.rand(3, 4)
+        scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+        self.assertEqual(scripted_pyassign_mod(input), 2 * input)
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+        class TestPyAssignError(nn.Module):
+            def __init__(self, obj):
+                super(TestPyAssignError, self).__init__()
+                self.proxy_mod = obj
 
-            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
-                torch.jit.script(TestPyAssignError(Foo()))
+        TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
-            # test pure python object assignment to interface fails
-            class PyClass(object):
-                def __init__(self):
-                    pass
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+            torch.jit.script(TestPyAssignError(Foo()))
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "the value is not a TorchScript compatible type"):
-                torch.jit.script(TestPyAssignError(PyClass()))
+        # test pure python object assignment to interface fails
+        class PyClass(object):
+            def __init__(self):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "the value is not a TorchScript compatible type"):
+            torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
 
