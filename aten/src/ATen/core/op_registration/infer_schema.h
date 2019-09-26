@@ -79,17 +79,16 @@ struct createReturns<void, void> final {
   }
 };
 
+C10_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, std::vector<Argument>&& arguments, std::vector<Argument>&& returns);
+
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
 /// function.
 template <typename FunctionTraits>
-FunctionSchema createFunctionSchemaFromTraits(std::string name, std::string overload_name) {
+FunctionSchema createFunctionSchemaFromTraits(std::string&& name, std::string&& overload_name) {
  using ReturnType = typename FunctionTraits::return_type;
  using ParameterTypes = typename FunctionTraits::parameter_types;
 
- auto arguments = createArguments<ParameterTypes>::call();
- auto returns = createReturns<ReturnType>::call();
-
- return {std::move(name), std::move(overload_name), std::move(arguments), std::move(returns)};
+ return make_function_schema(std::move(name), std::move(overload_name), createArguments<ParameterTypes>::call(), createReturns<ReturnType>::call());
 }
 }
 
