@@ -112,6 +112,18 @@ ${return_type} ${Type}::${api_name}(${type_method_formals}) {
 }
 """)
 
+DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_legacyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_legacyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -127,13 +139,13 @@ BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .catchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .kernel<${return_type} (${formals_types})>(TensorTypeId::${Backend}TensorId, &${Type}::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -1363,10 +1375,13 @@ def create_generic(top_env, declarations):
             if option['use_c10_dispatcher'] == 'full':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            else:
-                assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
+            elif option['use_c10_dispatcher'] == 'unboxed_only':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
+            else:
+                assert option['use_c10_dispatcher'] == 'no'
+                top_env['function_registrations'].append(
+                    check_namedtensor_enabled(DEFAULT_LEGACY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1833,10 +1848,13 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    else:
-                        assert option['use_c10_dispatcher'] in ['unboxed_only', 'no']
+                    elif option['use_c10_dispatcher'] == 'unboxed_only':
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
+                    else:
+                        assert option['use_c10_dispatcher'] == 'no'
+                        function_registrations.append(
+                            BACKEND_LEGACY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
